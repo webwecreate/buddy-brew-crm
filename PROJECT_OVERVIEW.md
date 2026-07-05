@@ -104,14 +104,33 @@ create table members (
 alter table members enable row level security;  -- ไม่มี policy = เข้าได้แค่ทาง edge function (service role) เท่านั้น
 ```
 
+### `menu_items` + `bean_options` (สร้างแล้ว มีข้อมูลเมนูจริงของร้านครบ)
+
+แก้ปัญหา "ไม่อยากให้พนักงานพิมพ์ราคาเอง" — ราคาผูกกับเมนูโดยตรง พนักงานแค่กดเลือก ระบบคำนวณให้เอง
+
+```sql
+menu_items (id, name, category, base_price, has_bean_choice, active)
+  -- category: signature / coffee / matcha / non_coffee / special
+  -- ตัวอย่าง: Latte / coffee / 60 / true
+  --          Drip Coffee / coffee / 100 / true   ← ดริปเป็นเมนูของตัวเอง ไม่ใช่ add-on
+  --          Matcha Latte / matcha / 85 / false
+
+bean_options (id, name, extra_price, active)
+  -- มาตรฐาน = +0, Special Beans (Osmanthus) = +20
+  -- กฎ: ราคาสุดท้าย = base_price + extra_price เสมอ (ดริป special = 100+20 = 120 ตรงกับที่ร้านคิด)
+```
+
+ข้อมูลเมนูทั้งหมด (Signature, Coffee, Matcha, Non-Coffee) ใส่ไว้ครบแล้วตาม migration `20260705040000_menu_items.sql`
+
 ### ตารางที่จะเพิ่มใน Phase 2
 
 ```
 points_transactions (
   id, member_id FK,
   point_change,
-  menu_item,        -- ชื่อเมนู เช่น "Espresso", "Latte", "Matcha" (null ถ้าไม่ใช่การซื้อเมนู)
-  category,         -- หมวดกว้าง เช่น "coffee" / "tea" (ช่วยคำนวณ badge ง่ายขึ้น)
+  menu_item_id FK -> menu_items.id,   -- อ้างอิงเมนูจริง ไม่ใช่พิมพ์ข้อความอิสระ
+  bean_option_id FK -> bean_options.id (nullable),
+  final_price,       -- snapshot ราคาตอนขายจริง (กันไม่ให้ประวัติเก่าเปลี่ยนถ้าแก้ราคาเมนูทีหลัง)
   reason,           -- ใช้ตอนไม่ใช่การซื้อเมนู เช่น "birthday_bonus", "referral_bonus"
   created_at        -- ใช้เป็นเวลาสั่งซื้อด้วย → คำนวณ badge ตามช่วงเวลาได้ (Early Bird / Night Owl)
 )
