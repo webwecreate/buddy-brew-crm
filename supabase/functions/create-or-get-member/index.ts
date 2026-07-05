@@ -1,4 +1,5 @@
 // Supabase Edge Function: create-or-get-member
+// (deployed via GitHub Actions — verifying auto-deploy pipeline)
 // Verifies a LINE LIFF ID token server-side, then creates or fetches the
 // matching member row. The anon key never touches the members table directly —
 // this function is the only door in, using the service role key.
