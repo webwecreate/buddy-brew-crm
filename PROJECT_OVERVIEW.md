@@ -165,9 +165,10 @@ order_claim_tokens (id, token, channel, point_value, status, claimed_by, claimed
 - [x] LINE: Provider + Messaging API channel (เชื่อมกับ OA เดิม) + LINE Login channel + LIFF app "Buddy Book" สร้างครบ
 - [x] GitHub repo `buddy-brew-plaform` (Public) + GitHub Pages เปิดใช้งานที่ `/docs`
 - [x] Repo จัดโครงสร้างให้ตรง Supabase CLI convention แล้ว (`supabase/functions`, `supabase/migrations`, `supabase/config.toml`)
-- [ ] **เชื่อม Supabase GitHub Integration ให้ auto-deploy จริง** (Project Settings → Integrations → GitHub) — ยังไม่ยืนยันว่าเชื่อมสำเร็จ
-- [ ] ทดสอบ login ผ่าน LIFF จบ end-to-end (เจอ error ระหว่างทาง กำลังไล่แก้ — ดู "ปัญหาที่เจอ" ข้อ 10)
-- [ ] ตกแต่งหน้า Buddy Book ให้ตรง CI (ตอนนี้เป็นเวอร์ชันทดสอบเปล่าๆ)
+- [x] เชื่อม Supabase GitHub Integration สำหรับ migrations (auto-apply เมื่อ push ยืนยันแล้วด้วย test migration)
+- [x] ตั้ง GitHub Actions (`​.github/workflows/deploy-functions.yml`) สำหรับ auto-deploy Edge Function เพราะ Integration หลักครอบคลุมแค่ migrations ไม่รวม functions
+- [x] **ทดสอบ login ผ่าน LIFF สำเร็จ end-to-end แล้ว** (2026-07-05) — tag ไว้ที่ `v1-first-login-success`
+- [ ] ตกแต่งหน้า Buddy Book ให้ตรง CI (ตอนนี้เป็นเวอร์ชันทดสอบเปล่าๆ — โชว์แค่ชื่อ+แต้ม)
 
 ## Phase 2 (ยังไม่เริ่ม)
 Tier graphic ใหม่ (Sip/Drink/Slurpp), Staff Panel (สแกน+กรอกแต้ม+อัพรูปลูกค้า), Reward Engine, Badge/Mission, Referral, Delivery QR claim, เชื่อม printer 58IIH
@@ -184,6 +185,8 @@ Lucky Wheel, Leaderboard, Seasonal Event, Coffee Passport, Personalized Offer
 3. **Edge Function 500 error** เกิดจาก 2 สาเหตุรวมกัน:
    - ตาราง `members` ไม่มีอยู่จริง (ลืมรัน migration หลังสร้างโปรเจกต์ใหม่รอบสอง)
    - `import ... from "https://esm.sh/@supabase/supabase-js@2"` ทำให้ function boot fail แบบเงียบ (log โชว์แค่ "booted" แล้ว "shutdown: EarlyDrop" ไม่มี error จริงโผล่) แก้โดยเปลี่ยนเป็น `import ... from "npm:@supabase/supabase-js@2"` ตาม convention ที่ Supabase แนะนำเอง
+4. **Supabase GitHub Integration (Project Settings → Integrations) auto-deploy แค่ database migrations เท่านั้น ไม่รวม Edge Functions** — ต้องตั้ง GitHub Actions แยกต่างหาก (`.github/workflows/deploy-functions.yml`) ใช้ `supabase/setup-cli` + secret `SUPABASE_ACCESS_TOKEN` ถึงจะ auto-deploy function ได้จริง
+5. **"permission denied for table members"** แม้ใช้ service_role key แล้ว — เกิดจากตอนสร้างโปรเจกต์ปิด "Automatically expose new tables" ไว้ ทำให้ตารางที่สร้างผ่าน raw SQL migration ไม่มี GRANT ให้ role ไหนเลยแม้แต่ service_role ต้องเพิ่ม `grant select, insert, update, delete on table members to service_role;` เอง แล้วสั่ง `notify pgrst, 'reload schema';` ต่อท้ายเพื่อบังคับ PostgREST รีเฟรช cache สิทธิ์ทันที (ไม่งั้นต้องรอ cache หมดอายุเอง)
 
 ---
 
