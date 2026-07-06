@@ -6,6 +6,7 @@
 <title>Buddy Brew Staff Panel</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont/dist/tabler-icons.min.css">
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1/build/qrcode.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <style>
   :root {
     --surface-2:#ffffff; --surface-1:#F1EFE8; --surface-0:#FAFAF8;
@@ -18,10 +19,22 @@
 </style>
 </head>
 <body>
-<div id="staff-panel" style="background: var(--surface-2); border-radius: 12px; border: 0.5px solid var(--border); padding: 1.25rem; max-width:420px; margin:0 auto;">
+<div id="login-screen" style="background: var(--surface-2); border-radius: 12px; border: 0.5px solid var(--border); padding: 1.25rem; max-width:340px; margin:0 auto; display:none;">
+  <div style="font-weight:500; font-size:16px; margin-bottom:16px;">เข้าสู่ระบบพนักงาน</div>
+  <form id="login-form">
+    <input id="login-email" type="email" placeholder="อีเมล" required style="width:100%; box-sizing:border-box; padding:10px; margin-bottom:8px; border-radius:8px; border:0.5px solid var(--border-strong); font-size:14px;">
+    <input id="login-password" type="password" placeholder="รหัสผ่าน" required style="width:100%; box-sizing:border-box; padding:10px; margin-bottom:8px; border-radius:8px; border:0.5px solid var(--border-strong); font-size:14px;">
+    <button type="submit" style="width:100%;">เข้าสู่ระบบ</button>
+  </form>
+  <div id="login-error" style="color:#A32D2D; font-size:13px; margin-top:8px; display:none;"></div>
+</div>
+<div id="staff-panel" style="background: var(--surface-2); border-radius: 12px; border: 0.5px solid var(--border); padding: 1.25rem; max-width:420px; margin:0 auto; display:none;">
   <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 12px;">
     <div id="crumb" style="font-size: 13px; color: var(--text-secondary); min-height: 18px;"></div>
-    <button id="temp-toggle" style="display:flex; align-items:center; gap:6px; padding: 6px 12px;"></button>
+    <div style="display:flex; align-items:center; gap:8px;">
+      <button id="temp-toggle" style="display:flex; align-items:center; gap:6px; padding: 6px 12px;"></button>
+      <button id="logout-btn" style="padding: 6px 12px;">ออกจากระบบ</button>
+    </div>
   </div>
   <div id="step-title" style="font-weight: 500; font-size: 16px; margin-bottom: 12px;"></div>
   <div id="grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px;"></div>
@@ -38,6 +51,9 @@ const SUPABASE_URL = "https://xsokynhtoxktazlomsnx.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_r-BdEYs8q61oSQKv_qJpPw_Xh5BPgRa";
 const LIFF_ID = "2010607478-4ZyARdyI";
 const LIFF_URL = `https://liff.line.me/${LIFF_ID}`;
+
+const sbClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+let currentSession = null;
 
 const categoryMeta = {
   signature: { icon: 'ti-star', label: 'Signature' },
@@ -59,6 +75,55 @@ const gridEl = document.getElementById('grid');
 const summaryEl = document.getElementById('summary');
 const backBtn = document.getElementById('back-btn');
 const tempToggle = document.getElementById('temp-toggle');
+const loginScreen = document.getElementById('login-screen');
+const staffPanel = document.getElementById('staff-panel');
+const loginForm = document.getElementById('login-form');
+const loginError = document.getElementById('login-error');
+const logoutBtn = document.getElementById('logout-btn');
+
+function showLogin() {
+  loginScreen.style.display = 'block';
+  staffPanel.style.display = 'none';
+}
+
+function showPanel() {
+  loginScreen.style.display = 'none';
+  staffPanel.style.display = 'block';
+}
+
+async function init() {
+  const { data: { session } } = await sbClient.auth.getSession();
+  if (session) {
+    currentSession = session;
+    showPanel();
+    loadMenu();
+  } else {
+    showLogin();
+  }
+}
+
+loginForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  loginError.style.display = 'none';
+  const email = document.getElementById('login-email').value;
+  const password = document.getElementById('login-password').value;
+  const { data, error } = await sbClient.auth.signInWithPassword({ email, password });
+  if (error) {
+    loginError.textContent = 'อีเมลหรือรหัสผ่านไม่ถูกต้อง';
+    loginError.style.display = 'block';
+    return;
+  }
+  currentSession = data.session;
+  showPanel();
+  loadMenu();
+});
+
+logoutBtn.addEventListener('click', async () => {
+  await sbClient.auth.signOut();
+  currentSession = null;
+  path = [];
+  showLogin();
+});
 
 async function loadMenu() {
   const headers = { apikey: SUPABASE_ANON_KEY, Authorization: "Bearer " + SUPABASE_ANON_KEY };
@@ -135,7 +200,7 @@ async function generateToken(item, bean) {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: "Bearer " + SUPABASE_ANON_KEY,
+      Authorization: "Bearer " + currentSession.access_token,
       apikey: SUPABASE_ANON_KEY,
     },
     body: JSON.stringify({ menu_item_id: item.id, bean_option_id: bean?.id ?? null, channel: "in_store" }),
@@ -174,7 +239,7 @@ function button(label, sub, onclick) {
 tempToggle.addEventListener('click', () => { isHot = !isHot; path = []; render(); });
 backBtn.addEventListener('click', () => { path.pop(); render(); });
 
-loadMenu();
+init();
 </script>
 </body>
 </html>

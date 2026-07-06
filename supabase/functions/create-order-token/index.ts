@@ -2,8 +2,8 @@
 // Called by Staff Panel. Given a menu item (+ optional bean choice), looks up its
 // point_value and creates a single-use claim token the customer scans to collect points.
 //
-// NOTE: this endpoint has no staff-login check yet — that's a follow-up task once
-// Staff Panel auth (Supabase email/password, Option A) is built. Fine for internal testing.
+// Requires a logged-in staff session (Supabase email/password, Option A) — see the
+// auth.getUser() check below. The anon key alone is not enough to call this.
 
 import { createClient } from "npm:@supabase/supabase-js@2";
 
@@ -18,6 +18,20 @@ Deno.serve(async (req) => {
   }
 
   try {
+    const supabase = createClient(
+      Deno.env.get("SUPABASE_URL") ?? "",
+      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
+    );
+
+    const jwt = (req.headers.get("Authorization") ?? "").replace("Bearer ", "");
+    const { data: { user }, error: authError } = await supabase.auth.getUser(jwt);
+    if (authError || !user) {
+      return new Response(JSON.stringify({ error: "staff login required" }), {
+        status: 401,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     const { menu_item_id, bean_option_id, channel } = await req.json();
     if (!menu_item_id) {
       return new Response(JSON.stringify({ error: "missing menu_item_id" }), {
@@ -25,11 +39,6 @@ Deno.serve(async (req) => {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
-
-    const supabase = createClient(
-      Deno.env.get("SUPABASE_URL") ?? "",
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
-    );
 
     const { data: menuItem, error: menuError } = await supabase
       .from("menu_items")
