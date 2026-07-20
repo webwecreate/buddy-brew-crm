@@ -5,16 +5,33 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Buddy Brew Member</title>
 <style>
-  body { font-family: sans-serif; text-align: center; padding: 40px 20px; background: #fdf6f3; }
-  img { width: 80px; height: 80px; border-radius: 50%; margin-bottom: 12px; }
-  h1 { color: #B32324; font-size: 20px; }
-  .point { font-size: 32px; font-weight: bold; color: #B32324; }
-  .status { color: #666; margin-top: 20px; }
-  .claim-success { color: #3B6D11; font-size: 18px; font-weight: bold; }
+  :root {
+    --brand:#B32324; --surface-2:#ffffff; --surface-1:#F1EFE8; --surface-0:#fdf6f3;
+    --text-primary:#1a1a1a; --text-secondary:#5f5e5a; --text-muted:#888780;
+    --border:#e3e1d8; --border-strong:#cfcdc2;
+  }
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; background: var(--surface-0); margin:0; color: var(--text-primary); padding-bottom: 72px; }
+  img.avatar { width: 72px; height: 72px; border-radius: 50%; }
+  button { padding: 10px 14px; border-radius: 8px; border: 0.5px solid var(--border-strong); background: #fff; cursor:pointer; font-size:14px; color: var(--text-primary); font-family: inherit; }
+  button:hover { background: var(--surface-1); }
+  .card { background: var(--surface-2); border-radius: 12px; border: 0.5px solid var(--border); padding: 1rem; margin-bottom: 12px; }
+  .claim-success { color: #3B6D11; font-size: 18px; font-weight: bold; text-align:center; padding: 3rem 1rem; }
+  .status { color: var(--text-secondary); text-align:center; padding: 3rem 1rem; }
+  #tab-bar { position:fixed; bottom:0; left:0; right:0; background:#fff; border-top:0.5px solid var(--border); display:flex; }
+  #tab-bar button { flex:1; border:0; border-radius:0; padding:12px 4px; font-size:12px; background:#fff; }
+  #tab-bar button.active { color: var(--brand); font-weight:600; }
+  .progress-track { background: var(--surface-1); border-radius: 8px; height: 10px; overflow:hidden; }
+  .progress-fill { background: var(--brand); height: 100%; }
+  .tier-row { display:flex; justify-content:space-between; align-items:center; padding:10px 0; border-bottom:0.5px solid var(--border); }
+  .tier-row:last-child { border-bottom:0; }
+  .tier-row.current { font-weight:600; color: var(--brand); }
+  .history-row { display:flex; justify-content:space-between; padding:8px 0; border-bottom:0.5px solid var(--border); font-size:14px; }
+  .history-row:last-child { border-bottom:0; }
 </style>
 </head>
 <body>
-  <div id="app">
+  <div id="app" style="max-width:480px; margin:0 auto; padding: 16px;">
     <p class="status">กำลังโหลด...</p>
   </div>
 
@@ -25,14 +42,197 @@
     const SUPABASE_ANON_KEY = "sb_publishable_r-BdEYs8q61oSQKv_qJpPw_Xh5BPgRa";
 
     const app = document.getElementById("app");
+    const anonHeaders = { apikey: SUPABASE_ANON_KEY, Authorization: "Bearer " + SUPABASE_ANON_KEY };
 
-    function showProfile(member) {
-      app.innerHTML = `
-        <img src="${member.picture_url ?? ""}" alt="">
-        <h1>สวัสดี ${member.display_name}</h1>
-        <p class="point">${member.point} แต้ม</p>
-        <p class="status">Tier: ${member.tier}</p>
+    let currentIdToken = null;
+    let currentMember = null;
+    let currentTab = 'member';
+    let currentSubpage = null; // 'tier-info' | 'history' | null
+
+    const TIER_LABELS = { sip: 'Sip', drink: 'Drink', slurpp: 'Slurpp' };
+
+    function tierProgress(tier, point) {
+      if (tier === 'slurpp') return { pct: 100, label: 'ระดับสูงสุดแล้ว' };
+      if (tier === 'drink') {
+        const pct = Math.max(0, Math.min(100, Math.round(((point - 100) / (300 - 100)) * 100)));
+        return { pct, label: `อีก ${Math.max(0, 300 - point)} แต้ม ถึง Slurpp` };
+      }
+      const pct = Math.max(0, Math.min(100, Math.round((point / 100) * 100)));
+      return { pct, label: `อีก ${Math.max(0, 100 - point)} แต้ม ถึง Drink` };
+    }
+
+    async function fetchHistory(limit) {
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/get-member-history`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...anonHeaders },
+        body: JSON.stringify({ idToken: currentIdToken, limit }),
+      });
+      if (!res.ok) return [];
+      const data = await res.json();
+      return data.history ?? [];
+    }
+
+    function renderHistoryRows(rows) {
+      if (rows.length === 0) return `<p style="color:var(--text-muted); font-size:13px;">ยังไม่มีประวัติ</p>`;
+      return rows.map(r => `
+        <div class="history-row">
+          <span>${r.label}</span>
+          <span style="color: ${r.point_change >= 0 ? '#3B6D11' : '#A32D2D'};">${r.point_change >= 0 ? '+' : ''}${r.point_change} แต้ม</span>
+        </div>
+      `).join('');
+    }
+
+    function renderTabBar() {
+      return `
+        <div id="tab-bar">
+          <button data-tab="member" class="${currentTab === 'member' ? 'active' : ''}">สมาชิก</button>
+          <button data-tab="promo" class="${currentTab === 'promo' ? 'active' : ''}">โปรโมชั่น</button>
+          <button data-tab="contact" class="${currentTab === 'contact' ? 'active' : ''}">ติดต่อ</button>
+        </div>
       `;
+    }
+
+    function wireTabBar() {
+      document.querySelectorAll('#tab-bar button').forEach(btn => {
+        btn.addEventListener('click', () => { currentTab = btn.dataset.tab; currentSubpage = null; renderCurrentView(); });
+      });
+    }
+
+    async function renderMemberTab() {
+      const progress = tierProgress(currentMember.tier, currentMember.point);
+      const history = await fetchHistory(3);
+      app.innerHTML = `
+        <div style="text-align:center; margin-bottom:16px;">
+          <img class="avatar" src="${currentMember.picture_url ?? ''}" alt="">
+          <h2 style="margin:8px 0 0;">สวัสดี ${currentMember.display_name}</h2>
+        </div>
+        <div class="card">
+          <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:8px;">
+            <span style="font-size:28px; font-weight:700; color: var(--brand);">${currentMember.point} แต้ม</span>
+            <span style="font-weight:600;">${TIER_LABELS[currentMember.tier] ?? currentMember.tier}</span>
+          </div>
+          <div class="progress-track"><div class="progress-fill" style="width:${progress.pct}%;"></div></div>
+          <p style="font-size:12px; color:var(--text-secondary); margin:6px 0 0;">${progress.label}</p>
+          <button id="tier-info-btn" style="width:100%; margin-top:12px;">ดูรายละเอียดแต้ม/Tier/รางวัล</button>
+        </div>
+        <div class="card">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+            <span style="font-weight:600;">ประวัติการได้แต้ม</span>
+            <button id="history-view-all">ดูทั้งหมด</button>
+          </div>
+          ${renderHistoryRows(history)}
+        </div>
+        ${renderTabBar()}
+      `;
+      document.getElementById('tier-info-btn').addEventListener('click', () => { currentSubpage = 'tier-info'; renderCurrentView(); });
+      document.getElementById('history-view-all').addEventListener('click', () => { currentSubpage = 'history'; renderCurrentView(); });
+      wireTabBar();
+    }
+
+    function renderTierInfoPage() {
+      const rows = [
+        { key: 'sip', label: 'Sip', range: '0–99 แต้ม' },
+        { key: 'drink', label: 'Drink', range: '100–299 แต้ม' },
+        { key: 'slurpp', label: 'Slurpp', range: '300 แต้มขึ้นไป' },
+      ];
+      app.innerHTML = `
+        <button id="back-btn" style="margin-bottom:12px;">← กลับ</button>
+        <div class="card">
+          <div style="font-weight:600; margin-bottom:8px;">วิธีได้แต้ม</div>
+          <p style="font-size:14px; color:var(--text-secondary);">ซื้อเครื่องดื่ม 1 แก้ว = 5 แต้ม ทุกเมนูเท่ากัน</p>
+        </div>
+        <div class="card">
+          <div style="font-weight:600; margin-bottom:8px;">Tier ของคุณ</div>
+          ${rows.map(r => `
+            <div class="tier-row ${r.key === currentMember.tier ? 'current' : ''}">
+              <span>${r.label}${r.key === currentMember.tier ? ' (คุณอยู่ที่นี่)' : ''}</span>
+              <span style="color:var(--text-secondary); font-size:13px;">${r.range}</span>
+            </div>
+          `).join('')}
+        </div>
+        <div class="card">
+          <div style="font-weight:600; margin-bottom:8px;">วิธีได้รางวัล</div>
+          <p style="font-size:14px; color:var(--text-secondary); margin:0 0 8px;">Badge — ปลดอัตโนมัติเมื่อทำเงื่อนไขสำเร็จ (เร็วๆ นี้)</p>
+          <p style="font-size:14px; color:var(--text-secondary); margin:0 0 8px;">คูปอง — ได้จากกิจกรรมพิเศษหรือแลกด้วยแต้ม (เร็วๆ นี้)</p>
+          <p style="font-size:14px; color:var(--text-secondary); margin:0;">ส่วนลด Tier — ใช้ได้เฉพาะหน้าร้านเท่านั้น</p>
+        </div>
+        ${renderTabBar()}
+      `;
+      document.getElementById('back-btn').addEventListener('click', () => { currentSubpage = null; renderCurrentView(); });
+      wireTabBar();
+    }
+
+    async function renderHistoryPage() {
+      app.innerHTML = `<button id="back-btn" style="margin-bottom:12px;">← กลับ</button><p class="status">กำลังโหลด...</p>`;
+      const history = await fetchHistory(100);
+      app.innerHTML = `
+        <button id="back-btn" style="margin-bottom:12px;">← กลับ</button>
+        <div class="card">
+          <div style="font-weight:600; margin-bottom:8px;">ประวัติการได้แต้มทั้งหมด</div>
+          ${renderHistoryRows(history)}
+        </div>
+        ${renderTabBar()}
+      `;
+      document.getElementById('back-btn').addEventListener('click', () => { currentSubpage = null; renderCurrentView(); });
+      wireTabBar();
+    }
+
+    async function renderPromoTab() {
+      app.innerHTML = `<p class="status">กำลังโหลด...</p>${renderTabBar()}`;
+      wireTabBar();
+      const res = await fetch(`${SUPABASE_URL}/rest/v1/promotions?select=*&active=eq.true&order=start_at.desc`, { headers: anonHeaders });
+      const promos = res.ok ? await res.json() : [];
+      const body = promos.length === 0
+        ? `<p style="color:var(--text-muted); text-align:center; padding:2rem 0;">ยังไม่มีโปรโมชั่นตอนนี้</p>`
+        : promos.map(p => `
+            <div class="card">
+              ${p.tag ? `<span style="font-size:11px; color: var(--brand); font-weight:600;">${p.tag}</span>` : ''}
+              <div style="font-weight:600; margin:4px 0;">${p.title}</div>
+              <p style="font-size:14px; color:var(--text-secondary); margin:0;">${p.description ?? ''}</p>
+            </div>
+          `).join('');
+      app.innerHTML = `${body}${renderTabBar()}`;
+      wireTabBar();
+    }
+
+    function renderContactTab() {
+      // TODO: placeholder — replace with real shop hours/address/phone/LINE OA link
+      app.innerHTML = `
+        <div class="card">
+          <div style="font-weight:600; margin-bottom:8px;">เวลาเปิด-ปิด</div>
+          <p style="font-size:14px; color:var(--text-secondary); margin:0;">(รอข้อมูลจริงจากร้าน)</p>
+        </div>
+        <div class="card">
+          <div style="font-weight:600; margin-bottom:8px;">ที่อยู่</div>
+          <p style="font-size:14px; color:var(--text-secondary); margin:0;">(รอข้อมูลจริงจากร้าน)</p>
+        </div>
+        <div class="card">
+          <div style="font-weight:600; margin-bottom:8px;">เบอร์โทร</div>
+          <p style="font-size:14px; color:var(--text-secondary); margin:0;">(รอข้อมูลจริงจากร้าน)</p>
+        </div>
+        <div class="card" style="text-align:center;">
+          <button style="width:100%;">แชท LINE OA</button>
+        </div>
+        ${renderTabBar()}
+      `;
+      wireTabBar();
+    }
+
+    function renderCurrentView() {
+      if (currentTab === 'member') {
+        if (currentSubpage === 'tier-info') return renderTierInfoPage();
+        if (currentSubpage === 'history') return renderHistoryPage();
+        return renderMemberTab();
+      }
+      if (currentTab === 'promo') return renderPromoTab();
+      if (currentTab === 'contact') return renderContactTab();
+    }
+
+    function renderApp(member) {
+      currentMember = member;
+      currentTab = 'member';
+      currentSubpage = null;
+      renderCurrentView();
     }
 
     async function main() {
@@ -43,17 +243,13 @@
         return;
       }
 
-      const idToken = liff.getIDToken();
-      const headers = {
-        "Content-Type": "application/json",
-        Authorization: "Bearer " + SUPABASE_ANON_KEY,
-        apikey: SUPABASE_ANON_KEY,
-      };
+      currentIdToken = liff.getIDToken();
+      const headers = { "Content-Type": "application/json", ...anonHeaders };
 
       const res = await fetch(`${SUPABASE_URL}/functions/v1/create-or-get-member`, {
         method: "POST",
         headers,
-        body: JSON.stringify({ idToken }),
+        body: JSON.stringify({ idToken: currentIdToken }),
       });
 
       if (!res.ok) {
@@ -70,7 +266,7 @@
         const claimRes = await fetch(`${SUPABASE_URL}/functions/v1/claim-order-token`, {
           method: "POST",
           headers,
-          body: JSON.stringify({ token, idToken }),
+          body: JSON.stringify({ token, idToken: currentIdToken }),
         });
         const claimData = await claimRes.json();
 
@@ -80,11 +276,11 @@
         } else {
           app.innerHTML = `<p class="status">รับแต้มไม่สำเร็จ: ${claimData.error}</p>`;
         }
-        setTimeout(() => showProfile(member), 3000);
+        setTimeout(() => renderApp(member), 3000);
         return;
       }
 
-      showProfile(member);
+      renderApp(member);
     }
 
     main().catch((err) => {
