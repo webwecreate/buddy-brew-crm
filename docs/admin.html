@@ -176,8 +176,8 @@ async function renderMembers() {
 
   pageEl.innerHTML = `
     <div class="card">
-      <input id="member-search" type="text" placeholder="ค้นหาชื่อสมาชิก..." style="width:100%; box-sizing:border-box; padding:10px; margin-bottom:12px; border-radius:8px; border:0.5px solid var(--border-strong);">
-      <div id="member-list" style="font-size:13px; color:var(--text-muted);">พิมพ์เพื่อค้นหา...</div>
+      <input id="member-search" type="text" placeholder="ค้นหาชื่อสมาชิก... (ว่างไว้เพื่อดูทั้งหมด)" style="width:100%; box-sizing:border-box; padding:10px; margin-bottom:12px; border-radius:8px; border:0.5px solid var(--border-strong);">
+      <div id="member-list" style="font-size:13px; color:var(--text-muted);">กำลังโหลด...</div>
     </div>
   `;
 
@@ -185,8 +185,8 @@ async function renderMembers() {
   const listEl = document.getElementById('member-list');
 
   async function search(term) {
-    if (!term) { listEl.innerHTML = `<p style="color:var(--text-muted);">พิมพ์เพื่อค้นหา...</p>`; return; }
-    const res = await fetch(`${SUPABASE_URL}/rest/v1/members?select=id,display_name,tier,point&display_name=ilike.*${encodeURIComponent(term)}*&order=display_name.asc&limit=20`, { headers: restHeaders() });
+    const filter = term ? `&display_name=ilike.*${encodeURIComponent(term)}*` : '';
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/members?select=id,display_name,tier,point&order=display_name.asc&limit=50${filter}`, { headers: restHeaders() });
     const rows = await res.json();
     if (!Array.isArray(rows) || rows.length === 0) { listEl.innerHTML = `<p style="color:var(--text-muted);">ไม่พบสมาชิก</p>`; return; }
     listEl.innerHTML = rows.map(m => `
@@ -199,6 +199,8 @@ async function renderMembers() {
       el.addEventListener('click', () => { selectedMember = el.dataset.id; renderPage(); });
     });
   }
+
+  search('');
 
   let debounceTimer;
   searchInput.addEventListener('input', () => {
@@ -220,46 +222,108 @@ async function renderMemberDetail(memberId) {
       <div style="color:var(--text-secondary); font-size:13px; margin-top:4px;">${member.tier} · ${member.point} แต้ม</div>
     </div>
     <div class="card" style="margin-bottom:12px;">
-      <div style="font-weight:500; margin-bottom:8px;">รูป/โน้ตประจำตัว (เห็นเฉพาะพนักงาน/แอดมิน)</div>
-      <input id="photo-url" type="text" placeholder="ลิงก์รูป (URL)" value="${member.staff_photo_url ?? ''}" style="width:100%; box-sizing:border-box; padding:8px; margin-bottom:8px; border-radius:8px; border:0.5px solid var(--border-strong);">
-      <textarea id="staff-note" placeholder="โน้ต (จำหน้า/นิสัย/ชื่อเล่น)" rows="3" style="width:100%; box-sizing:border-box; padding:8px; margin-bottom:8px; border-radius:8px; border:0.5px solid var(--border-strong);">${member.staff_note ?? ''}</textarea>
-      <button id="save-notes">บันทึก</button>
+      <div style="font-weight:500; margin-bottom:8px;">รูปประจำตัว (เห็นเฉพาะพนักงาน/แอดมิน)</div>
+      <div id="photo-preview-wrap" style="margin-bottom:8px;"></div>
+      <input id="photo-file" type="file" accept="image/*" style="display:none;">
+      <button id="photo-upload-btn">อัปโหลดรูป</button>
+      <span id="photo-status" style="display:none; font-size:13px; margin-left:8px;"></span>
+    </div>
+    <div class="card" style="margin-bottom:12px;">
+      <div style="font-weight:500; margin-bottom:8px;">โน้ต (จำหน้า/นิสัย/ชื่อเล่น)</div>
+      <textarea id="staff-note" rows="3" style="width:100%; box-sizing:border-box; padding:8px; margin-bottom:8px; border-radius:8px; border:0.5px solid var(--border-strong);">${member.staff_note ?? ''}</textarea>
+      <button id="save-notes">บันทึกโน้ต</button>
       <span id="notes-saved" style="display:none; color:#2D7A3D; font-size:13px; margin-left:8px;">บันทึกแล้ว</span>
     </div>
     <div class="card">
       <div style="font-weight:500; margin-bottom:8px;">ปรับแต้มด้วยมือ</div>
-      <input id="point-delta" type="number" placeholder="+/- แต้ม" style="width:120px; padding:8px; margin-right:8px; border-radius:8px; border:0.5px solid var(--border-strong);">
+      <div style="display:flex; gap:8px; margin-bottom:8px;">
+        <button id="mode-add" type="button">+ เพิ่มแต้ม</button>
+        <button id="mode-sub" type="button">- ลดแต้ม</button>
+      </div>
+      <input id="point-amount" type="number" min="1" placeholder="จำนวนแต้ม" style="width:120px; padding:8px; margin-right:8px; border-radius:8px; border:0.5px solid var(--border-strong);">
       <input id="adjust-reason" type="text" placeholder="เหตุผล" style="width:calc(100% - 260px); min-width:140px; padding:8px; margin-right:8px; border-radius:8px; border:0.5px solid var(--border-strong);">
       <button id="submit-adjust">ปรับแต้ม</button>
-      <div id="adjust-error" style="color:#A32D2D; font-size:13px; margin-top:8px; display:none;"></div>
+      <div id="adjust-message" style="font-size:13px; margin-top:8px; display:none;"></div>
     </div>
   `;
 
   document.getElementById('back-to-list').addEventListener('click', () => { selectedMember = null; renderPage(); });
 
+  function renderPhotoPreview(url) {
+    const wrap = document.getElementById('photo-preview-wrap');
+    if (!url) { wrap.innerHTML = `<p style="color:var(--text-muted); font-size:13px; margin:0;">ยังไม่มีรูป</p>`; return; }
+    wrap.innerHTML = `<img id="photo-thumb" src="${url}" style="height:80px; width:80px; object-fit:cover; border-radius:8px; cursor:pointer; border:0.5px solid var(--border);">`;
+    document.getElementById('photo-thumb').addEventListener('click', () => {
+      const overlay = document.createElement('div');
+      overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.75); display:flex; align-items:center; justify-content:center; z-index:1000; cursor:pointer;';
+      overlay.innerHTML = `<img src="${url}" style="max-width:90vw; max-height:90vh; border-radius:8px;">`;
+      overlay.addEventListener('click', () => overlay.remove());
+      document.body.appendChild(overlay);
+    });
+  }
+  renderPhotoPreview(member.staff_photo_url);
+
+  document.getElementById('photo-upload-btn').addEventListener('click', () => document.getElementById('photo-file').click());
+  document.getElementById('photo-file').addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const statusEl = document.getElementById('photo-status');
+    statusEl.style.display = 'inline';
+    statusEl.textContent = 'กำลังอัปโหลด...';
+    const ext = file.name.split('.').pop();
+    const path = `${memberId}-${Date.now()}.${ext}`;
+    const { error: uploadError } = await sbClient.storage.from('member-photos').upload(path, file, { upsert: true });
+    if (uploadError) {
+      statusEl.textContent = 'อัปโหลดไม่สำเร็จ';
+      return;
+    }
+    const { data: { publicUrl } } = sbClient.storage.from('member-photos').getPublicUrl(path);
+    await fetch(`${SUPABASE_URL}/rest/v1/members?id=eq.${memberId}`, {
+      method: "PATCH",
+      headers: { ...restHeaders(), "Content-Type": "application/json", Prefer: "return=minimal" },
+      body: JSON.stringify({ staff_photo_url: publicUrl }),
+    });
+    statusEl.textContent = 'อัปโหลดสำเร็จ';
+    renderPhotoPreview(publicUrl);
+    setTimeout(() => { statusEl.style.display = 'none'; }, 2000);
+  });
+
   document.getElementById('save-notes').addEventListener('click', async () => {
-    const photoUrl = document.getElementById('photo-url').value.trim();
     const note = document.getElementById('staff-note').value.trim();
     await fetch(`${SUPABASE_URL}/rest/v1/members?id=eq.${memberId}`, {
       method: "PATCH",
       headers: { ...restHeaders(), "Content-Type": "application/json", Prefer: "return=minimal" },
-      body: JSON.stringify({ staff_photo_url: photoUrl || null, staff_note: note || null }),
+      body: JSON.stringify({ staff_note: note || null }),
     });
     const savedEl = document.getElementById('notes-saved');
     savedEl.style.display = 'inline';
     setTimeout(() => { savedEl.style.display = 'none'; }, 2000);
   });
 
+  let adjustMode = 'add';
+  const modeAddBtn = document.getElementById('mode-add');
+  const modeSubBtn = document.getElementById('mode-sub');
+  function setAdjustMode(mode) {
+    adjustMode = mode;
+    modeAddBtn.style.background = mode === 'add' ? 'var(--surface-1)' : '#fff';
+    modeSubBtn.style.background = mode === 'sub' ? 'var(--surface-1)' : '#fff';
+  }
+  setAdjustMode('add');
+  modeAddBtn.addEventListener('click', () => setAdjustMode('add'));
+  modeSubBtn.addEventListener('click', () => setAdjustMode('sub'));
+
   document.getElementById('submit-adjust').addEventListener('click', async () => {
-    const errorEl = document.getElementById('adjust-error');
-    errorEl.style.display = 'none';
-    const delta = parseInt(document.getElementById('point-delta').value, 10);
+    const msgEl = document.getElementById('adjust-message');
+    msgEl.style.display = 'none';
+    const amount = parseInt(document.getElementById('point-amount').value, 10);
     const reason = document.getElementById('adjust-reason').value.trim();
-    if (!delta || !reason) {
-      errorEl.textContent = 'กรอกจำนวนแต้มและเหตุผลก่อน';
-      errorEl.style.display = 'block';
+    if (!amount || amount <= 0 || !reason) {
+      msgEl.style.color = '#A32D2D';
+      msgEl.textContent = 'กรอกจำนวนแต้ม (มากกว่า 0) และเหตุผลก่อน';
+      msgEl.style.display = 'block';
       return;
     }
+    const delta = adjustMode === 'add' ? amount : -amount;
     const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/manual_adjust_points`, {
       method: "POST",
       headers: { ...restHeaders(), "Content-Type": "application/json" },
@@ -267,11 +331,15 @@ async function renderMemberDetail(memberId) {
     });
     const result = await res.json();
     if (!res.ok || result.success === false) {
-      errorEl.textContent = result.error ?? 'ปรับแต้มไม่สำเร็จ';
-      errorEl.style.display = 'block';
+      msgEl.style.color = '#A32D2D';
+      msgEl.textContent = result.error ?? 'ปรับแต้มไม่สำเร็จ';
+      msgEl.style.display = 'block';
       return;
     }
-    renderMemberDetail(memberId);
+    msgEl.style.color = '#2D7A3D';
+    msgEl.textContent = `ปรับแต้มสำเร็จ (${delta > 0 ? '+' : ''}${delta} แต้ม)`;
+    msgEl.style.display = 'block';
+    setTimeout(() => renderMemberDetail(memberId), 1200);
   });
 }
 
