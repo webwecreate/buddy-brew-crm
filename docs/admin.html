@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Buddy Brew Admin Dashboard</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont/dist/tabler-icons.min.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<style>
+  :root {
+    --surface-2:#ffffff; --surface-1:#F1EFE8; --surface-0:#FAFAF8;
+    --text-primary:#1a1a1a; --text-secondary:#5f5e5a; --text-muted:#888780;
+    --border:#e3e1d8; --border-strong:#cfcdc2; --radius:8px;
+  }
+  body { font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; background: var(--surface-0); margin:0; padding: 24px 16px; color: var(--text-primary); }
+  button { padding: 8px 14px; border-radius: 8px; border: 0.5px solid var(--border-strong); background: #fff; cursor:pointer; font-size:14px; color: var(--text-primary); font-family: inherit; }
+  button:hover { background: var(--surface-1); }
+  button:disabled { cursor: default; opacity: 0.5; }
+  input, textarea { font-family: inherit; font-size: 14px; }
+  .card { background: var(--surface-2); border-radius: 12px; border: 0.5px solid var(--border); padding: 1.25rem; }
+  .nav-item { display:flex; align-items:center; gap:10px; padding:10px 12px; border-radius:8px; cursor:pointer; font-size:14px; }
+  .nav-item.active { background: var(--surface-1); font-weight:500; }
+  .nav-item.disabled { color: var(--text-muted); cursor:default; }
+  .stat-card { background: var(--surface-2); border-radius: 12px; border: 0.5px solid var(--border); padding: 1rem; text-align:center; }
+  .stat-value { font-size: 28px; font-weight: 600; }
+  .stat-label { font-size: 13px; color: var(--text-secondary); margin-top:4px; }
+</style>
+</head>
+<body>
+
+<div id="login-screen" class="card" style="max-width:340px; margin:0 auto; display:none;">
+  <div style="font-weight:500; font-size:16px; margin-bottom:16px;">เข้าสู่ระบบ Admin</div>
+  <form id="login-form">
+    <input id="login-email" type="email" placeholder="อีเมล" required style="width:100%; box-sizing:border-box; padding:10px; margin-bottom:8px; border-radius:8px; border:0.5px solid var(--border-strong);">
+    <input id="login-password" type="password" placeholder="รหัสผ่าน" required style="width:100%; box-sizing:border-box; padding:10px; margin-bottom:8px; border-radius:8px; border:0.5px solid var(--border-strong);">
+    <button type="submit" style="width:100%;">เข้าสู่ระบบ</button>
+  </form>
+  <div id="login-error" style="color:#A32D2D; font-size:13px; margin-top:8px; display:none;"></div>
+</div>
+
+<div id="dashboard" style="display:none; max-width:960px; margin:0 auto;">
+  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+    <div style="font-weight:600; font-size:18px;">Buddy Brew Admin</div>
+    <button id="logout-btn">ออกจากระบบ</button>
+  </div>
+  <div style="display:flex; gap:20px; align-items:flex-start;">
+    <div class="card" id="nav" style="width:180px; flex-shrink:0; padding:0.75rem;"></div>
+    <div id="page-content" style="flex:1; min-width:0;"></div>
+  </div>
+</div>
+
+<script>
+const SUPABASE_URL = "https://xsokynhtoxktazlomsnx.supabase.co";
+const SUPABASE_ANON_KEY = "sb_publishable_r-BdEYs8q61oSQKv_qJpPw_Xh5BPgRa";
+
+const sbClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+let currentSession = null;
+let currentPage = 'overview';
+let selectedMember = null;
+
+const loginScreen = document.getElementById('login-screen');
+const dashboard = document.getElementById('dashboard');
+const loginForm = document.getElementById('login-form');
+const loginError = document.getElementById('login-error');
+const logoutBtn = document.getElementById('logout-btn');
+const navEl = document.getElementById('nav');
+const pageEl = document.getElementById('page-content');
+
+const pages = [
+  { key: 'overview', label: 'Overview', icon: 'ti-layout-dashboard', enabled: true },
+  { key: 'members', label: 'สมาชิก', icon: 'ti-users', enabled: true },
+  { key: 'points', label: 'แต้ม', icon: 'ti-coin', enabled: false },
+  { key: 'menu', label: 'เมนู', icon: 'ti-coffee', enabled: false },
+  { key: 'badges', label: 'Badge/Mission', icon: 'ti-award', enabled: false },
+  { key: 'reports', label: 'รายงาน', icon: 'ti-chart-bar', enabled: false },
+  { key: 'staff', label: 'พนักงาน', icon: 'ti-id-badge-2', enabled: false },
+];
+
+function showLogin() {
+  loginScreen.style.display = 'block';
+  dashboard.style.display = 'none';
+}
+
+function showDashboard() {
+  loginScreen.style.display = 'none';
+  dashboard.style.display = 'block';
+  renderNav();
+  renderPage();
+}
+
+async function init() {
+  const { data: { session } } = await sbClient.auth.getSession();
+  if (session) {
+    currentSession = session;
+    showDashboard();
+  } else {
+    showLogin();
+  }
+}
+
+loginForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  loginError.style.display = 'none';
+  const email = document.getElementById('login-email').value;
+  const password = document.getElementById('login-password').value;
+  const { data, error } = await sbClient.auth.signInWithPassword({ email, password });
+  if (error) {
+    loginError.textContent = 'อีเมลหรือรหัสผ่านไม่ถูกต้อง';
+    loginError.style.display = 'block';
+    return;
+  }
+  currentSession = data.session;
+  showDashboard();
+});
+
+logoutBtn.addEventListener('click', async () => {
+  await sbClient.auth.signOut();
+  currentSession = null;
+  showLogin();
+});
+
+function renderNav() {
+  navEl.innerHTML = pages.map(p => `
+    <div class="nav-item ${p.key === currentPage ? 'active' : ''} ${p.enabled ? '' : 'disabled'}" data-key="${p.key}">
+      <i class="ti ${p.icon}" style="font-size:16px;"></i>
+      <span>${p.label}</span>
+      ${p.enabled ? '' : '<span style="font-size:11px; margin-left:auto;">เร็วๆ นี้</span>'}
+    </div>
+  `).join('');
+  navEl.querySelectorAll('.nav-item').forEach(el => {
+    const page = pages.find(p => p.key === el.dataset.key);
+    if (!page.enabled) return;
+    el.addEventListener('click', () => { currentPage = page.key; selectedMember = null; renderNav(); renderPage(); });
+  });
+}
+
+function restHeaders() {
+  return {
+    apikey: SUPABASE_ANON_KEY,
+    Authorization: "Bearer " + currentSession.access_token,
+  };
+}
+
+async function renderPage() {
+  if (currentPage === 'overview') return renderOverview();
+  if (currentPage === 'members') return renderMembers();
+}
+
+async function renderOverview() {
+  pageEl.innerHTML = `<p style="color:var(--text-muted); font-size:13px;">กำลังโหลด...</p>`;
+  const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
+  const todayIso = todayStart.toISOString();
+
+  const [totalRes, newTodayRes, txTodayRes] = await Promise.all([
+    fetch(`${SUPABASE_URL}/rest/v1/members?select=id`, { headers: { ...restHeaders(), Prefer: "count=exact" } }),
+    fetch(`${SUPABASE_URL}/rest/v1/members?select=id&created_at=gte.${todayIso}`, { headers: { ...restHeaders(), Prefer: "count=exact" } }),
+    fetch(`${SUPABASE_URL}/rest/v1/points_transactions?select=point_change&created_at=gte.${todayIso}&point_change=gt.0`, { headers: restHeaders() }),
+  ]);
+
+  const totalCount = totalRes.headers.get('content-range')?.split('/')[1] ?? '?';
+  const newTodayCount = newTodayRes.headers.get('content-range')?.split('/')[1] ?? '?';
+  const txToday = await txTodayRes.json();
+  const pointsToday = Array.isArray(txToday) ? txToday.reduce((sum, t) => sum + t.point_change, 0) : 0;
+
+  pageEl.innerHTML = `
+    <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap:12px;">
+      <div class="stat-card"><div class="stat-value">${totalCount}</div><div class="stat-label">สมาชิกทั้งหมด</div></div>
+      <div class="stat-card"><div class="stat-value">${newTodayCount}</div><div class="stat-label">สมาชิกใหม่วันนี้</div></div>
+      <div class="stat-card"><div class="stat-value">${pointsToday}</div><div class="stat-label">แต้มแจกวันนี้</div></div>
+    </div>
+  `;
+}
+
+async function renderMembers() {
+  if (selectedMember) return renderMemberDetail(selectedMember);
+
+  pageEl.innerHTML = `
+    <div class="card">
+      <input id="member-search" type="text" placeholder="ค้นหาชื่อสมาชิก..." style="width:100%; box-sizing:border-box; padding:10px; margin-bottom:12px; border-radius:8px; border:0.5px solid var(--border-strong);">
+      <div id="member-list" style="font-size:13px; color:var(--text-muted);">พิมพ์เพื่อค้นหา...</div>
+    </div>
+  `;
+
+  const searchInput = document.getElementById('member-search');
+  const listEl = document.getElementById('member-list');
+
+  async function search(term) {
+    if (!term) { listEl.innerHTML = `<p style="color:var(--text-muted);">พิมพ์เพื่อค้นหา...</p>`; return; }
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/members?select=id,display_name,tier,point&display_name=ilike.*${encodeURIComponent(term)}*&order=display_name.asc&limit=20`, { headers: restHeaders() });
+    const rows = await res.json();
+    if (!Array.isArray(rows) || rows.length === 0) { listEl.innerHTML = `<p style="color:var(--text-muted);">ไม่พบสมาชิก</p>`; return; }
+    listEl.innerHTML = rows.map(m => `
+      <div class="member-row" data-id="${m.id}" style="display:flex; justify-content:space-between; padding:10px 8px; border-bottom:0.5px solid var(--border); cursor:pointer;">
+        <span>${m.display_name}</span>
+        <span style="color:var(--text-secondary);">${m.tier} · ${m.point} แต้ม</span>
+      </div>
+    `).join('');
+    listEl.querySelectorAll('.member-row').forEach(el => {
+      el.addEventListener('click', () => { selectedMember = el.dataset.id; renderPage(); });
+    });
+  }
+
+  let debounceTimer;
+  searchInput.addEventListener('input', () => {
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(() => search(searchInput.value.trim()), 300);
+  });
+}
+
+async function renderMemberDetail(memberId) {
+  pageEl.innerHTML = `<p style="color:var(--text-muted); font-size:13px;">กำลังโหลด...</p>`;
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/members?select=*&id=eq.${memberId}`, { headers: restHeaders() });
+  const [member] = await res.json();
+  if (!member) { pageEl.innerHTML = `<p>ไม่พบสมาชิก</p>`; return; }
+
+  pageEl.innerHTML = `
+    <button id="back-to-list" style="margin-bottom:12px;"><i class="ti ti-arrow-left" style="font-size:14px; vertical-align:-2px;"></i> กลับ</button>
+    <div class="card" style="margin-bottom:12px;">
+      <div style="font-weight:500; font-size:16px;">${member.display_name}</div>
+      <div style="color:var(--text-secondary); font-size:13px; margin-top:4px;">${member.tier} · ${member.point} แต้ม</div>
+    </div>
+    <div class="card" style="margin-bottom:12px;">
+      <div style="font-weight:500; margin-bottom:8px;">รูป/โน้ตประจำตัว (เห็นเฉพาะพนักงาน/แอดมิน)</div>
+      <input id="photo-url" type="text" placeholder="ลิงก์รูป (URL)" value="${member.staff_photo_url ?? ''}" style="width:100%; box-sizing:border-box; padding:8px; margin-bottom:8px; border-radius:8px; border:0.5px solid var(--border-strong);">
+      <textarea id="staff-note" placeholder="โน้ต (จำหน้า/นิสัย/ชื่อเล่น)" rows="3" style="width:100%; box-sizing:border-box; padding:8px; margin-bottom:8px; border-radius:8px; border:0.5px solid var(--border-strong);">${member.staff_note ?? ''}</textarea>
+      <button id="save-notes">บันทึก</button>
+      <span id="notes-saved" style="display:none; color:#2D7A3D; font-size:13px; margin-left:8px;">บันทึกแล้ว</span>
+    </div>
+    <div class="card">
+      <div style="font-weight:500; margin-bottom:8px;">ปรับแต้มด้วยมือ</div>
+      <input id="point-delta" type="number" placeholder="+/- แต้ม" style="width:120px; padding:8px; margin-right:8px; border-radius:8px; border:0.5px solid var(--border-strong);">
+      <input id="adjust-reason" type="text" placeholder="เหตุผล" style="width:calc(100% - 260px); min-width:140px; padding:8px; margin-right:8px; border-radius:8px; border:0.5px solid var(--border-strong);">
+      <button id="submit-adjust">ปรับแต้ม</button>
+      <div id="adjust-error" style="color:#A32D2D; font-size:13px; margin-top:8px; display:none;"></div>
+    </div>
+  `;
+
+  document.getElementById('back-to-list').addEventListener('click', () => { selectedMember = null; renderPage(); });
+
+  document.getElementById('save-notes').addEventListener('click', async () => {
+    const photoUrl = document.getElementById('photo-url').value.trim();
+    const note = document.getElementById('staff-note').value.trim();
+    await fetch(`${SUPABASE_URL}/rest/v1/members?id=eq.${memberId}`, {
+      method: "PATCH",
+      headers: { ...restHeaders(), "Content-Type": "application/json", Prefer: "return=minimal" },
+      body: JSON.stringify({ staff_photo_url: photoUrl || null, staff_note: note || null }),
+    });
+    const savedEl = document.getElementById('notes-saved');
+    savedEl.style.display = 'inline';
+    setTimeout(() => { savedEl.style.display = 'none'; }, 2000);
+  });
+
+  document.getElementById('submit-adjust').addEventListener('click', async () => {
+    const errorEl = document.getElementById('adjust-error');
+    errorEl.style.display = 'none';
+    const delta = parseInt(document.getElementById('point-delta').value, 10);
+    const reason = document.getElementById('adjust-reason').value.trim();
+    if (!delta || !reason) {
+      errorEl.textContent = 'กรอกจำนวนแต้มและเหตุผลก่อน';
+      errorEl.style.display = 'block';
+      return;
+    }
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/manual_adjust_points`, {
+      method: "POST",
+      headers: { ...restHeaders(), "Content-Type": "application/json" },
+      body: JSON.stringify({ p_member_id: memberId, p_delta: delta, p_reason: reason }),
+    });
+    const result = await res.json();
+    if (!res.ok || result.success === false) {
+      errorEl.textContent = result.error ?? 'ปรับแต้มไม่สำเร็จ';
+      errorEl.style.display = 'block';
+      return;
+    }
+    renderMemberDetail(memberId);
+  });
+}
+
+init();
+</script>
+</body>
+</html>
