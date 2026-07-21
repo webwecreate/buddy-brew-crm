@@ -24,6 +24,22 @@
   .stat-card { background: var(--surface-2); border-radius: 12px; border: 0.5px solid var(--border); padding: 1rem; text-align:center; }
   .stat-value { font-size: 28px; font-weight: 600; }
   .stat-label { font-size: 13px; color: var(--text-secondary); margin-top:4px; }
+  #dashboard-body { display:flex; gap:20px; align-items:flex-start; }
+  #nav { width:180px; flex-shrink:0; padding:0.75rem; }
+  #page-content { flex:1; min-width:0; }
+
+  @media (max-width: 640px) {
+    body { padding: 16px 12px 78px; }
+    #dashboard-body { flex-direction: column; }
+    #nav {
+      position: fixed; left:0; right:0; bottom:0; width:auto; z-index:100;
+      display:flex; flex-direction:row; justify-content:space-around;
+      border-radius:0; border-width:0.5px 0 0 0; padding:4px;
+    }
+    .nav-item { flex-direction:column; gap:2px; padding:6px 2px; font-size:11px; text-align:center; }
+    .nav-item .ti { font-size:20px; }
+    .nav-soon { display:none; }
+  }
 </style>
 </head>
 <body>
@@ -43,9 +59,9 @@
     <div style="font-weight:600; font-size:18px;">Buddy Brew Admin</div>
     <button id="logout-btn">ออกจากระบบ</button>
   </div>
-  <div style="display:flex; gap:20px; align-items:flex-start;">
-    <div class="card" id="nav" style="width:180px; flex-shrink:0; padding:0.75rem;"></div>
-    <div id="page-content" style="flex:1; min-width:0;"></div>
+  <div id="dashboard-body">
+    <div class="card" id="nav"></div>
+    <div id="page-content"></div>
   </div>
 </div>
 
@@ -124,7 +140,7 @@ function renderNav() {
     <div class="nav-item ${p.key === currentPage ? 'active' : ''} ${p.enabled ? '' : 'disabled'}" data-key="${p.key}">
       <i class="ti ${p.icon}" style="font-size:16px;"></i>
       <span>${p.label}</span>
-      ${p.enabled ? '' : '<span style="font-size:11px; margin-left:auto;">เร็วๆ นี้</span>'}
+      ${p.enabled ? '' : '<span class="nav-soon" style="font-size:11px; margin-left:auto;">เร็วๆ นี้</span>'}
     </div>
   `).join('');
   navEl.querySelectorAll('.nav-item').forEach(el => {
