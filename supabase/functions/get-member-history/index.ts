@@ -1,8 +1,13 @@
 // Supabase Edge Function: get-member-history
 // Called by Buddy Book. Verifies the LINE ID token the same way as create-or-get-member,
-// then returns the matching member's own recent points_transactions rows. Customers aren't
-// Supabase Auth users, so there's no authenticated-role RLS path — identity has to be
-// proven via the LINE token, same pattern as create-or-get-member/claim-order-token.
+// then returns the matching member's own recent points_transactions rows plus their badge
+// progress. Customers aren't Supabase Auth users, so there's no authenticated-role RLS path —
+// identity has to be proven via the LINE token, same pattern as create-or-get-member/claim-order-token.
+//
+// Also lazily checks the "Buddy Friend" (1-year anniversary) badge here, since it's date-based
+// rather than tied to a points_transactions event — the DB trigger (check_badge_unlocks in
+// 20260707060000_badge_seed_and_unlock.sql) only fires on purchases, so this is the one place
+// that can catch it, on whatever the member's next Buddy Book visit happens to be.
 
 import { createClient } from "npm:@supabase/supabase-js@2";
 
@@ -51,7 +56,7 @@ Deno.serve(async (req) => {
 
     const { data: member, error: memberError } = await supabase
       .from("members")
-      .select("id")
+      .select("id, created_at")
       .eq("line_user_id", lineUserId)
       .single();
 
@@ -60,6 +65,23 @@ Deno.serve(async (req) => {
         status: 404,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
+    }
+
+    const oneYearMs = 365 * 24 * 60 * 60 * 1000;
+    if (Date.now() - new Date(member.created_at).getTime() >= oneYearMs) {
+      const { data: buddyFriendBadge } = await supabase
+        .from("badges")
+        .select("id")
+        .eq("name", "Buddy Friend")
+        .single();
+      if (buddyFriendBadge) {
+        await supabase
+          .from("badges_earned")
+          .upsert(
+            { member_id: member.id, badge_id: buddyFriendBadge.id },
+            { onConflict: "member_id,badge_id", ignoreDuplicates: true },
+          );
+      }
     }
 
     const { data: history, error: historyError } = await supabase
@@ -83,7 +105,20 @@ Deno.serve(async (req) => {
       created_at: row.created_at,
     }));
 
-    return new Response(JSON.stringify({ history: formatted }), {
+    const [{ data: allBadges }, { data: earned }] = await Promise.all([
+      supabase.from("badges").select("id, name, icon").eq("active", true).order("name"),
+      supabase.from("badges_earned").select("badge_id, earned_at").eq("member_id", member.id),
+    ]);
+
+    const earnedMap = new Map((earned ?? []).map((e) => [e.badge_id, e.earned_at]));
+    const badges = (allBadges ?? []).map((b) => ({
+      name: b.name,
+      icon: b.icon,
+      earned: earnedMap.has(b.id),
+      earned_at: earnedMap.get(b.id) ?? null,
+    }));
+
+    return new Response(JSON.stringify({ history: formatted, badges }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (err) {

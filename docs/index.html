@@ -47,7 +47,7 @@
     let currentIdToken = null;
     let currentMember = null;
     let currentTab = 'member';
-    let currentSubpage = null; // 'tier-info' | 'history' | null
+    let currentSubpage = null; // 'tier-info' | 'history' | 'badges' | null
 
     const TIER_LABELS = { sip: 'Sip', drink: 'Drink', slurpp: 'Slurpp' };
 
@@ -61,15 +61,15 @@
       return { pct, label: `อีก ${Math.max(0, 100 - point)} แต้ม ถึง Drink` };
     }
 
-    async function fetchHistory(limit) {
+    async function fetchMemberActivity(limit) {
       const res = await fetch(`${SUPABASE_URL}/functions/v1/get-member-history`, {
         method: "POST",
         headers: { "Content-Type": "application/json", ...anonHeaders },
         body: JSON.stringify({ idToken: currentIdToken, limit }),
       });
-      if (!res.ok) return [];
+      if (!res.ok) return { history: [], badges: [] };
       const data = await res.json();
-      return data.history ?? [];
+      return { history: data.history ?? [], badges: data.badges ?? [] };
     }
 
     function renderHistoryRows(rows) {
@@ -78,6 +78,19 @@
         <div class="history-row">
           <span>${r.label}</span>
           <span style="color: ${r.point_change >= 0 ? '#3B6D11' : '#A32D2D'};">${r.point_change >= 0 ? '+' : ''}${r.point_change} แต้ม</span>
+        </div>
+      `).join('');
+    }
+
+    function renderBadgeRows(badges, showAll) {
+      const list = showAll ? badges : badges.filter(b => b.earned).slice(0, 3);
+      if (list.length === 0) {
+        return `<p style="color:var(--text-muted); font-size:13px;">${showAll ? 'ยังไม่มีข้อมูล badge' : 'ยังไม่มี badge ที่ปลด'}</p>`;
+      }
+      return list.map(b => `
+        <div class="history-row">
+          <span style="${b.earned ? '' : 'color:var(--text-muted);'}">${b.earned ? '🏅' : '🔒'} ${b.name}</span>
+          <span style="color:${b.earned ? '#3B6D11' : 'var(--text-muted)'}; font-size:12px;">${b.earned ? 'ปลดแล้ว' : 'ยังไม่ปลด'}</span>
         </div>
       `).join('');
     }
@@ -100,7 +113,7 @@
 
     async function renderMemberTab() {
       const progress = tierProgress(currentMember.tier, currentMember.point);
-      const history = await fetchHistory(3);
+      const { history, badges } = await fetchMemberActivity(3);
       app.innerHTML = `
         <div style="text-align:center; margin-bottom:16px;">
           <img class="avatar" src="${currentMember.picture_url ?? ''}" alt="">
@@ -122,10 +135,18 @@
           </div>
           ${renderHistoryRows(history)}
         </div>
+        <div class="card">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+            <span style="font-weight:600;">Badge</span>
+            <button id="badge-view-all">ดูทั้งหมด</button>
+          </div>
+          ${renderBadgeRows(badges, false)}
+        </div>
         ${renderTabBar()}
       `;
       document.getElementById('tier-info-btn').addEventListener('click', () => { currentSubpage = 'tier-info'; renderCurrentView(); });
       document.getElementById('history-view-all').addEventListener('click', () => { currentSubpage = 'history'; renderCurrentView(); });
+      document.getElementById('badge-view-all').addEventListener('click', () => { currentSubpage = 'badges'; renderCurrentView(); });
       wireTabBar();
     }
 
@@ -152,7 +173,7 @@
         </div>
         <div class="card">
           <div style="font-weight:600; margin-bottom:8px;">วิธีได้รางวัล</div>
-          <p style="font-size:14px; color:var(--text-secondary); margin:0 0 8px;">Badge — ปลดอัตโนมัติเมื่อทำเงื่อนไขสำเร็จ (เร็วๆ นี้)</p>
+          <p style="font-size:14px; color:var(--text-secondary); margin:0 0 8px;">Badge — ปลดอัตโนมัติเมื่อทำเงื่อนไขสำเร็จ</p>
           <p style="font-size:14px; color:var(--text-secondary); margin:0 0 8px;">คูปอง — ได้จากกิจกรรมพิเศษหรือแลกด้วยแต้ม (เร็วๆ นี้)</p>
           <p style="font-size:14px; color:var(--text-secondary); margin:0;">ส่วนลด Tier — ใช้ได้เฉพาะหน้าร้านเท่านั้น</p>
         </div>
@@ -164,12 +185,27 @@
 
     async function renderHistoryPage() {
       app.innerHTML = `<button id="back-btn" style="margin-bottom:12px;">← กลับ</button><p class="status">กำลังโหลด...</p>`;
-      const history = await fetchHistory(100);
+      const { history } = await fetchMemberActivity(100);
       app.innerHTML = `
         <button id="back-btn" style="margin-bottom:12px;">← กลับ</button>
         <div class="card">
           <div style="font-weight:600; margin-bottom:8px;">ประวัติการได้แต้มทั้งหมด</div>
           ${renderHistoryRows(history)}
+        </div>
+        ${renderTabBar()}
+      `;
+      document.getElementById('back-btn').addEventListener('click', () => { currentSubpage = null; renderCurrentView(); });
+      wireTabBar();
+    }
+
+    async function renderBadgesPage() {
+      app.innerHTML = `<button id="back-btn" style="margin-bottom:12px;">← กลับ</button><p class="status">กำลังโหลด...</p>`;
+      const { badges } = await fetchMemberActivity(1);
+      app.innerHTML = `
+        <button id="back-btn" style="margin-bottom:12px;">← กลับ</button>
+        <div class="card">
+          <div style="font-weight:600; margin-bottom:8px;">Badge ทั้งหมด</div>
+          ${renderBadgeRows(badges, true)}
         </div>
         ${renderTabBar()}
       `;
@@ -222,6 +258,7 @@
       if (currentTab === 'member') {
         if (currentSubpage === 'tier-info') return renderTierInfoPage();
         if (currentSubpage === 'history') return renderHistoryPage();
+        if (currentSubpage === 'badges') return renderBadgesPage();
         return renderMemberTab();
       }
       if (currentTab === 'promo') return renderPromoTab();
