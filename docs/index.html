@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Buddy Brew Member</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont/dist/tabler-icons.min.css">
 <style>
   :root {
     --brand:#B32324; --surface-2:#ffffff; --surface-1:#F1EFE8; --surface-0:#fdf6f3;
@@ -28,6 +29,9 @@
   .tier-row.current { font-weight:600; color: var(--brand); }
   .history-row { display:flex; justify-content:space-between; padding:8px 0; border-bottom:0.5px solid var(--border); font-size:14px; }
   .history-row:last-child { border-bottom:0; }
+  .badge-row { border-bottom:0.5px solid var(--border); }
+  .badge-row:last-child { border-bottom:0; }
+  .badge-detail { padding:0 0 10px; font-size:13px; color:var(--text-secondary); }
 </style>
 </head>
 <body>
@@ -102,11 +106,25 @@
         return `<p style="color:var(--text-muted); font-size:13px;">${showAll ? 'ยังไม่มีข้อมูล badge' : 'ยังไม่มี badge ให้แนะนำตอนนี้'}</p>`;
       }
       return list.map(b => `
-        <div class="history-row">
-          <span style="${b.earned ? '' : 'color:var(--text-muted);'}">${b.earned ? '🏅' : '🔒'} ${b.name}</span>
-          <span style="color:${b.earned ? '#3B6D11' : 'var(--text-muted)'}; font-size:12px;">${b.earned ? 'ปลดแล้ว' : 'ยังไม่ปลด'}</span>
+        <div class="badge-row">
+          <div class="history-row" style="border-bottom:0; ${showAll ? 'cursor:pointer;' : ''}" ${showAll ? 'data-badge-toggle' : ''}>
+            <span style="${b.earned ? '' : 'color:var(--text-muted);'}">
+              <i class="ti ${b.earned ? b.icon : 'ti-lock'}" style="font-size:16px; vertical-align:-3px; margin-right:6px;"></i>${b.name}
+            </span>
+            <span style="color:${b.earned ? '#3B6D11' : 'var(--text-muted)'}; font-size:12px;">${b.earned ? 'ปลดแล้ว' : 'ยังไม่ปลด'}</span>
+          </div>
+          ${showAll ? `<div class="badge-detail" style="display:none;">${b.condition ?? ''}</div>` : ''}
         </div>
       `).join('');
+    }
+
+    function wireBadgeToggles() {
+      document.querySelectorAll('[data-badge-toggle]').forEach(row => {
+        row.addEventListener('click', () => {
+          const detail = row.nextElementSibling;
+          if (detail) detail.style.display = detail.style.display === 'none' ? 'block' : 'none';
+        });
+      });
     }
 
     function renderTabBar() {
@@ -224,6 +242,7 @@
         ${renderTabBar()}
       `;
       document.getElementById('back-btn').addEventListener('click', () => { currentSubpage = null; renderCurrentView(); });
+      wireBadgeToggles();
       wireTabBar();
     }
 

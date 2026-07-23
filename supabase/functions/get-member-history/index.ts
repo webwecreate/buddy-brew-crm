@@ -106,7 +106,7 @@ Deno.serve(async (req) => {
     }));
 
     const [{ data: allBadges }, { data: earned }] = await Promise.all([
-      supabase.from("badges").select("id, name, icon").eq("active", true).order("name"),
+      supabase.from("badges").select("id, name, icon, condition").eq("active", true).order("name"),
       supabase.from("badges_earned").select("badge_id, earned_at").eq("member_id", member.id),
     ]);
 
@@ -114,6 +114,7 @@ Deno.serve(async (req) => {
     const badges = (allBadges ?? []).map((b) => ({
       name: b.name,
       icon: b.icon,
+      condition: b.condition,
       earned: earnedMap.has(b.id),
       earned_at: earnedMap.get(b.id) ?? null,
     }));
